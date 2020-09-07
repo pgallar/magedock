@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+
+_SCRIPT_NAME=$0
+_VERSION=0.1.0
+_ARGSHIFT=1
+
+app_docker="app"
+db_docker="db"
+_VERBOSE=
+action=
+
+# print error message [ execute command ] and exit [ with defined status ]
+error() {
+    echo "${_SCRIPT_NAME}: $1" > /dev/stderr
+    [ $# -gt 2 ] && eval "$2" && exit "$3"
+    [ $# -gt 1 ] && exit "$2"
+    exit 1
+}
+
+# print log message
+log() {
+    echo "${_SCRIPT_NAME}: $1" > /dev/stderr
+}
+
+# print debug message if script called with verbose mode
+debug() {
+    [ "$_VERBOSE" ] && echo "${_SCRIPT_NAME}: $1" > /dev/stderr
+}
+
+usage() {
+cat << EOF
+usage: $0 [-v] action
+
+Magento 2 Docker
+
+
+Flags:
+-v, --verbose  Enable verbose mode
+
+Standard Options:
+--help     Show this help
+--version  Show script version
+EOF
+}
+
+get_options() {
+    _SILENT=
+    _OPTSTRING="${_SILENT}v-:"
+    while getopts "${_OPTSTRING}" _OPTION
+    do
+      case "${_OPTION}" in
+        v)
+          _ARGSHIFT="${OPTIND}"
+          _VERBOSE=1
+          ;;
+        -)
+          case "${OPTARG}" in
+            help) usage && exit 0;;
+            version) echo "$_VERSION" && exit 0;;
+            verbose)
+              _VERBOSE=1
+              _ARGSHIFT="${OPTIND}"
+              ;;
+            *)
+              if [ "$OPTERR" = 1 ] && [ -z "$_SILENT" ]; then
+                error "illegal option -- ${OPTARG}" usage 1
+              fi
+              ;;
+            esac;;
+       \?)
+          # VERBOSE MODE
+          # invalid option: _OPTION is set to ? (question-mark) and OPTARG is unset
+          # required argument not found: _OPTION is set to ? (question-mark), OPTARG is unset and an error message is printed
+          [ -z "$_SILENT" ] && usage && exit 1
+          # SILENT MODE
+          # invalid option: _OPTION is set to ? (question-mark) and OPTARG is set to the (invalid) option character
+          [ ! -z "$_SILENT" ] && echo "illegal option -- ${OPTARG}"
+          ;;
+        :)
+          # SILENT MODE
+          # required argument not found: _OPTION is set to : (colon) and OPTARG contains the option-character in question
+          echo "option requires an argument -- ${OPTARG}"
+          ;;
+      esac
+    done
+}
+
+get_arguments() {
+    _ARGS="action"
+
+    shift $(( _ARGSHIFT - 1 ))
+
+    for _ARG in $_ARGS
+    do
+      if [ ! -z "$1" ]; then
+        eval "$_ARG=$1"
+      fi
+      shift
+    done
+}
+
+stop_docker() {
+  docker-compose -f ./.docker/docker-compose.yml stop
+}
+
+connect_docker() {
+  docker exec -ti $app_docker bash  
+}
+
+start_docker() {
+  stop_docker
+
+  docker-compose -f ./.docker/docker-compose.yml up -d
+}
+
+install() {
+  if [ -z "$1" ];
+    then
+      echo "No magento version supplied"
+      exit
+  fi
+
+  #sudo apt install docker docker-compose
+  #start_docker
+  docker exec -ti $app_docker sh -c "  export COMPOSER_MEMORY_LIMIT=-1"
+  docker exec -ti $app_docker sh -c "php -d memory_limit=-1 /usr/local/bin/composer create-project --repository-url=https://repo.magento.com/ magento/project-community-edition=$1 /var/www/html/temp --ignore-platform-reqs"
+  docker exec -ti $app_docker sh -c 'mv /var/www/html/temp/* /var/www/html'
+  docker exec -ti $app_docker sh -c 'rm -rf /var/www/html/temp'
+  docker exec -ti $db_docker mysql "-e create database magento"
+  docker exec -ti $app_docker sh -c "php bin/magento setup:install --base-url=http://localhost/ --db-host=db --db-name=magento --db-user=root --admin-firstname=Admin --admin-lastname=User --admin-email=user@example.com --admin-user=admin --admin-password=admin123 --language=es_AR --currency=USD --timezone=America/Argentina/Buenos_Aires --use-rewrites=1"
+  docker exec -ti $db_docker mysql "-e use magento; insert into core_config_data (config_id, scope, scope_id, path, value) values (null, 'default', 0, 'dev/static/sign', 0);"
+  docker exec -ti $app_docker sh -c 'php bin/magento se:up'
+  docker exec -ti $app_docker sh -c 'php bin/magento se:di:compile'
+  docker exec -ti $app_docker sh -c 'php bin/magento se:static-content:deploy -f en_US es_AR'
+}
+
+init() {
+    get_options "$@"
+    get_arguments "$@"
+
+    # ARGUMENTS:
+    debug " -- ARGUMENTS"
+    debug "|"
+    # $action : Action argument to execute rutines
+    debug "|   action=$action"
+    debug "|"
+
+
+   # FLAGS:
+   debug " -- FLAGS"
+   debug "|"
+   # $_VERBOSE : Enable verbose mode
+   debug "|   _VERBOSE=$_VERBOSE"
+   debug "|"
+
+   case "$action" in
+    "magento")
+      magento_command="php bin/magento ${@:2}"
+      docker exec -ti $app_docker $magento_command
+      ;;
+    "composer")
+      composer_command="php -d memory_limit=-1 /usr/local/bin/composer ${@:2}"
+      docker exec -ti $app_docker $composer_command
+      ;;
+    "start")
+      start_docker
+      ;;
+    "stop")
+      stop_docker
+      ;;
+    "connect")
+      connect_docker
+      ;;
+    "install")
+      install $2
+      ;;
+    *)
+      echo "Command not found"
+      exit 1
+      ;;
+  esac
+}
+
+init "$@"
