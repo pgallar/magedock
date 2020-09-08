@@ -42,6 +42,7 @@ RUN docker-php-ext-install mcrypt && docker-php-ext-enable mcrypt
 RUN docker-php-ext-install xsl && docker-php-ext-enable xsl
 RUN docker-php-ext-install mysqli && docker-php-ext-enable mysqli
 RUN docker-php-ext-install bcmath && docker-php-ext-enable bcmath
+RUN docker-php-ext-install sockets && docker-php-ext-enable sockets
 
 
 # Install composer

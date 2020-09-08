@@ -3,11 +3,17 @@
 _SCRIPT_NAME=$0
 _VERSION=0.1.0
 _ARGSHIFT=1
-
-app_docker="app"
-db_docker="db"
 _VERBOSE=
 action=
+
+CFG_FILE=.docker/magedock.config
+CFG_CONTENT=$(cat $CFG_FILE | sed -r '/[^=]+=[^=]+/!d' | sed -r 's/\s+=\s/=/g')
+eval "$CFG_CONTENT"
+
+app_docker=$(echo $app_docker | sed -e 's/\r//g')
+db_docker=$(echo $db_docker | sed -e 's/\r//g')
+db_user=$(echo $db_user | sed -e 's/\r//g')
+db_password=$(echo $db_password | sed -e 's/\r//g')
 
 # print error message [ execute command ] and exit [ with defined status ]
 error() {
@@ -104,7 +110,7 @@ stop_docker() {
 }
 
 connect_docker() {
-  docker exec -ti $app_docker bash  
+  docker exec -ti $app_docker bash
 }
 
 start_docker() {
@@ -113,22 +119,44 @@ start_docker() {
   docker-compose -f ./.docker/docker-compose.yml up -d
 }
 
+init() {
+  sudo apt install docker docker-compose
+  start_docker
+}
+
 install() {
+  #init
+  createproject $1
+}
+
+createproject() {
   if [ -z "$1" ];
     then
       echo "No magento version supplied"
       exit
   fi
 
-  #sudo apt install docker docker-compose
-  #start_docker
-  docker exec -ti $app_docker sh -c "  export COMPOSER_MEMORY_LIMIT=-1"
-  docker exec -ti $app_docker sh -c "php -d memory_limit=-1 /usr/local/bin/composer create-project --repository-url=https://repo.magento.com/ magento/project-community-edition=$1 /var/www/html/temp --ignore-platform-reqs"
-  docker exec -ti $app_docker sh -c 'mv /var/www/html/temp/* /var/www/html'
-  docker exec -ti $app_docker sh -c 'rm -rf /var/www/html/temp'
-  docker exec -ti $db_docker mysql "-e create database magento"
-  docker exec -ti $app_docker sh -c "php bin/magento setup:install --base-url=http://localhost/ --db-host=db --db-name=magento --db-user=root --admin-firstname=Admin --admin-lastname=User --admin-email=user@example.com --admin-user=admin --admin-password=admin123 --language=es_AR --currency=USD --timezone=America/Argentina/Buenos_Aires --use-rewrites=1"
-  docker exec -ti $db_docker mysql "-e use magento; insert into core_config_data (config_id, scope, scope_id, path, value) values (null, 'default', 0, 'dev/static/sign', 0);"
+  sh .docker/installer.sh $app_docker $db_docker $1 $db_user $db_password
+
+  refresh
+}
+
+get_mysql_connection_string() {
+  if [ -z "$1" ];
+    then
+      echo "No user db supplied"
+      exit
+  fi
+
+  mysql_conn_string="-u $1"
+
+  if [ ! -z "$2" ];
+    then
+      mysql_conn_string="$mysql_conn_string -p$2"
+  fi
+}
+
+refresh() {
   docker exec -ti $app_docker sh -c 'php bin/magento se:up'
   docker exec -ti $app_docker sh -c 'php bin/magento se:di:compile'
   docker exec -ti $app_docker sh -c 'php bin/magento se:static-content:deploy -f en_US es_AR'
@@ -162,6 +190,24 @@ init() {
       composer_command="php -d memory_limit=-1 /usr/local/bin/composer ${@:2}"
       docker exec -ti $app_docker $composer_command
       ;;
+    "mysql")
+      get_mysql_connection_string $db_user $db_password
+      mysql_command="mysql $mysql_conn_string magento ${@:2}"
+      docker exec -ti $db_docker $mysql_command
+      ;;
+    "dump")
+      get_mysql_connection_string $db_user $db_password
+      file_dump=$(date '+%Y-%m-%d')
+      mysql_command="mysqldump $mysql_conn_string magento -r /var/mysql/$file_dump.sql"
+      echo $mysql_command
+      docker exec -ti $db_docker $mysql_command
+      ;;
+    "refresh")
+      refresh
+      ;;
+    "update")
+      docker-compose -f ./.docker/docker-compose.yml build
+      ;;
     "start")
       start_docker
       ;;
@@ -173,6 +219,9 @@ init() {
       ;;
     "install")
       install $2
+      ;;
+    "init")
+      init
       ;;
     *)
       echo "Command not found"

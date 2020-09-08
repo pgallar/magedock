@@ -7,7 +7,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: digitalocean.com/php
-    container_name: app
+    container_name: mocona-app
     restart: unless-stopped
     tty: true
     volumes:
@@ -22,12 +22,12 @@ services:
     ports:
       - "9000:9000"
     networks:
-      - network
+      - mocona-network
 
   #Nginx Service
   webserver:
     image: nginx:alpine
-    container_name: webserver
+    container_name: mocona-webserver
     restart: unless-stopped
     tty: true
     volumes:
@@ -37,16 +37,17 @@ services:
       - "80:80"
       - "443:443"
     networks:
-      - network
+      - mocona-network
 
   #MySQL Service
   db:
     image: mysql:5.7.22
-    container_name: db
+    container_name: mocona-db
     restart: unless-stopped
     tty: true
     volumes:
       - dbdata:/var/lib/mysql
+      - ./../:/var/mysql
       - ./mysql/my.cnf:/etc/mysql/my.cnf
     ports:
       - "3306:3306"
@@ -56,11 +57,11 @@ services:
       SERVICE_TAGS: dev
       SERVICE_NAME: mysql
     networks:
-      - network
+      - mocona-network
       
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.8.0
-    container_name: elasticsearch
+    container_name: mocona-elasticsearch
     ports:
       - "9200"
     environment:
@@ -77,22 +78,22 @@ services:
       - ./elasticsearch/sysctl.conf:/etc/sysctl.conf
       - elasticsearch:/usr/share/elasticsearch/data
     networks:
-      - network
+      - mocona-network
 
   phpmyadmin:
     image: phpmyadmin:latest
-    container_name: phpmyadmin
+    container_name: mocona-phpmyadmin
     ports:
       - "8080:80"
-    links:x
+    links:
       - "db:db"
     networks:
-      - network
+      - mocona-network
     
 
 #Docker Networks
 networks:
-  network:
+  mocona-network:
     driver: bridge
 
 volumes:
