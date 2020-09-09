@@ -125,7 +125,7 @@ init() {
 }
 
 install() {
-  #init
+  init
   createproject $1
 }
 
